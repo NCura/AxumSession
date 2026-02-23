@@ -61,9 +61,9 @@ impl<C: Connection> DatabasePool for SessionSurrealPool<C> {
     }
 
     async fn delete_by_expiry(&self, table_name: &str) -> Result<Vec<String>, DatabaseError> {
-        use serde::Deserialize;
+        use surrealdb_types::SurrealValue;
 
-        #[derive(Deserialize)]
+        #[derive(SurrealValue)]
         struct SessionRecord {
             sessionid: String,
         }
@@ -118,7 +118,7 @@ impl<C: Connection> DatabasePool for SessionSurrealPool<C> {
     ) -> Result<(), DatabaseError> {
         self.connection
         .query(
-            "UPSERT type::thing($table_name, $session_id) SET sessionstore = $store, sessionexpires = $expire, sessionid = $session_id;",
+            "UPSERT type::record($table_name, $session_id) SET sessionstore = $store, sessionexpires = $expire, sessionid = $session_id;",
         )
         .bind(("table_name", table_name.to_string()))
         .bind(("session_id", id.to_string()))
@@ -133,7 +133,7 @@ impl<C: Connection> DatabasePool for SessionSurrealPool<C> {
         let mut res = self
             .connection
             .query(
-                "SELECT sessionstore FROM type::thing($table_name, $session_id)
+                "SELECT sessionstore FROM type::record($table_name, $session_id)
                 WHERE sessionexpires = NONE OR sessionexpires > $expires;",
             )
             .bind(("table_name", table_name.to_string()))
@@ -163,7 +163,7 @@ impl<C: Connection> DatabasePool for SessionSurrealPool<C> {
         let mut res = self
             .connection
             .query(
-                "SELECT count() AS amount FROM type::thing($table_name, $session_id)
+                "SELECT count() AS amount FROM type::record($table_name, $session_id)
                 WHERE sessionexpires = NONE OR sessionexpires > $expires GROUP BY amount;",
             )
             .bind(("table_name", table_name.to_string()))
