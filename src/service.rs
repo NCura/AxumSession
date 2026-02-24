@@ -64,11 +64,13 @@ where
         let mut ready_inner = std::mem::replace(&mut self.inner, not_ready_inner);
 
         Box::pin(async move {
+            let session_total_start = std::time::Instant::now();
             let ip_user_agent = get_ips_hash(&req, &store);
 
             #[cfg(not(feature = "rest_mode"))]
             let cookies = get_cookies(req.headers());
 
+            let t = std::time::Instant::now();
             #[cfg(not(feature = "rest_mode"))]
             let (session_id, storable) = get_headers_and_key(&store, cookies, &ip_user_agent).await;
 
@@ -77,16 +79,20 @@ where
 
             #[cfg(feature = "rest_mode")]
             let (session_id, storable) = get_headers_and_key(&store, headers, &ip_user_agent).await;
+            eprintln!("[SESSION] get_headers_and_key: {}ms", t.elapsed().as_millis());
 
+            let t = std::time::Instant::now();
             let (mut session, is_new) = match Session::new(store, session_id).await {
                 Ok(v) => v,
                 Err(err) => {
                     return trace_error(err, "failed to generate Session ID");
                 }
             };
+            eprintln!("[SESSION] Session::new (is_new={}): {}ms", is_new, t.elapsed().as_millis());
 
             // Check if the session id exists if not lets check if it exists in the database or generate a new session.
             // If manual mode is enabled then do not check for a Session unless the ID is not new.
+            let t = std::time::Instant::now();
             let check_database: bool = if is_new && !session.store.config.session_mode.is_manual() {
                 let sess = SessionData::new(session.id.clone(), storable, &session.store.config);
                 session.store.inner.insert(session.id.clone(), sess);
@@ -98,6 +104,7 @@ where
             };
 
             if check_database {
+                let t_load = std::time::Instant::now();
                 let mut fresh_session = session
                     .store
                     .load_session(session.id.clone())
@@ -111,6 +118,7 @@ where
                         );
                         SessionData::new(session.id.clone(), storable, &session.store.config)
                     });
+                eprintln!("[SESSION] load_session from DB: {}ms", t_load.elapsed().as_millis());
 
                 fresh_session.autoremove = Utc::now() + session.store.config.memory.memory_lifespan;
                 fresh_session.store = storable;
@@ -121,20 +129,21 @@ where
                     .inner
                     .insert(session.id.clone(), fresh_session);
             }
+            eprintln!("[SESSION] check_database={}: {}ms", check_database, t.elapsed().as_millis());
 
+            let t = std::time::Instant::now();
             let (last_sweep, last_database_sweep) = {
                 let timers = session.store.timers.read().await;
                 (timers.last_expiry_sweep, timers.last_database_expiry_sweep)
             };
+            eprintln!("[SESSION] read timers: {}ms", t.elapsed().as_millis());
 
-            // This branch runs less often, and we already have write access,
-            // let's check if any sessions expired. We don't want to hog memory
-            // forever by abandoned sessions (e.g. when a client lost their cookie)
-            // throttle by memory lifespan - e.g. sweep every hour
+            let t_sweeps = std::time::Instant::now();
             let current_time = Utc::now();
 
             if last_sweep <= current_time && !session.store.config.memory.memory_lifespan.is_zero()
             {
+                eprintln!("[SESSION] memory sweep TRIGGERED");
                 tracing::info!(
                     "Session id {}: Session Memory Cleaning Started",
                     session.id.clone()
@@ -168,8 +177,8 @@ where
                 );
             }
 
-            // Throttle by database lifespan - e.g. sweep every 6 hours
             if last_database_sweep <= current_time && session.store.is_persistent() {
+                eprintln!("[SESSION] database sweep TRIGGERED");
                 tracing::info!(
                     "Session id {}: Session Database Cleaning Started",
                     session.id
@@ -210,11 +219,13 @@ where
                 );
             }
 
-            // Sets a clone of the Store in the Extensions for Direct usage and sets the Session for Direct usage
-            //req.extensions_mut().insert(store.clone());
+            eprintln!("[SESSION] sweeps: {}ms", t_sweeps.elapsed().as_millis());
+
             req.extensions_mut().insert(session.clone());
 
+            let t = std::time::Instant::now();
             let mut response = ready_inner.call(req).await?;
+            eprintln!("[SESSION] inner call: {}ms", t.elapsed().as_millis());
 
             let (renew, storable, destroy, loaded) =
                 if let Some(session_data) = session.store.inner.get(&session.id) {
@@ -300,10 +311,11 @@ where
                 };
 
                 if let Some(sess) = clone_session {
+                    let t_store = std::time::Instant::now();
                     if let Err(err) = session.store.store_session(&sess).await {
                         return trace_error(err, "failed to save session to database");
                     } else {
-                        tracing::info!("Session id {}: was saved to the database.", session.id);
+                        eprintln!("[SESSION] store_session (UPSERT): {}ms", t_store.elapsed().as_millis());
                     }
                 }
             }
@@ -346,6 +358,7 @@ where
                 session.store.inner.remove(&session.id);
             }
 
+            let t = std::time::Instant::now();
             set_headers(
                 &session,
                 response.headers_mut(),
@@ -354,7 +367,9 @@ where
                 storable,
             )
             .await;
+            eprintln!("[SESSION] set_headers: {}ms", t.elapsed().as_millis());
 
+            eprintln!("[SESSION] TOTAL: {}ms", session_total_start.elapsed().as_millis());
             Ok(response)
         })
     }
