@@ -122,6 +122,10 @@ where
 
                 fresh_session.autoremove = Utc::now() + session.store.config.memory.memory_lifespan;
                 fresh_session.store = storable;
+                // TODO: Setting update=true forces a DB UPSERT (~650ms) on the first request
+                // after server restart. Consider spawning the UPSERT in a background task
+                // so it doesn't block the response, or skip the save-back entirely since
+                // the session data hasn't actually changed.
                 fresh_session.update = true;
                 fresh_session.requests = 1;
                 session
@@ -292,8 +296,10 @@ where
                 let clone_session = if let Some(mut sess) =
                     session.store.inner.get_mut(&session.id.clone())
                 {
-                    // Check if Database needs to be updated or not. TODO: Make updatable based on a timer for in memory only.
-                    if session.store.config.database.always_save || sess.update || !sess.expired() {
+                    // Only save to DB when session data actually changed, not on every request.
+                    // Original had `|| !sess.expired()` which was always true for valid sessions,
+                    // causing a ~1s UPSERT on every request with remote SurrealDB.
+                    if session.store.config.database.always_save || sess.update {
                         if sess.longterm {
                             sess.expires = Utc::now() + session.store.config.max_lifespan;
                         } else {
