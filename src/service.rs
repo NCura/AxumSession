@@ -79,7 +79,7 @@ where
 
             #[cfg(feature = "rest_mode")]
             let (session_id, storable) = get_headers_and_key(&store, headers, &ip_user_agent).await;
-            eprintln!("[SESSION] get_headers_and_key: {}ms", t.elapsed().as_millis());
+            tracing::debug!("[SESSION] get_headers_and_key: {}ms", t.elapsed().as_millis());
 
             let t = std::time::Instant::now();
             let (mut session, is_new) = match Session::new(store, session_id).await {
@@ -88,7 +88,7 @@ where
                     return trace_error(err, "failed to generate Session ID");
                 }
             };
-            eprintln!("[SESSION] Session::new (is_new={}): {}ms", is_new, t.elapsed().as_millis());
+            tracing::debug!("[SESSION] Session::new (is_new={}): {}ms", is_new, t.elapsed().as_millis());
 
             // Check if the session id exists if not lets check if it exists in the database or generate a new session.
             // If manual mode is enabled then do not check for a Session unless the ID is not new.
@@ -118,7 +118,7 @@ where
                         );
                         SessionData::new(session.id.clone(), storable, &session.store.config)
                     });
-                eprintln!("[SESSION] load_session from DB: {}ms", t_load.elapsed().as_millis());
+                tracing::debug!("[SESSION] load_session from DB: {}ms", t_load.elapsed().as_millis());
 
                 fresh_session.autoremove = Utc::now() + session.store.config.memory.memory_lifespan;
                 fresh_session.store = storable;
@@ -133,21 +133,21 @@ where
                     .inner
                     .insert(session.id.clone(), fresh_session);
             }
-            eprintln!("[SESSION] check_database={}: {}ms", check_database, t.elapsed().as_millis());
+            tracing::debug!("[SESSION] check_database={}: {}ms", check_database, t.elapsed().as_millis());
 
             let t = std::time::Instant::now();
             let (last_sweep, last_database_sweep) = {
                 let timers = session.store.timers.read().await;
                 (timers.last_expiry_sweep, timers.last_database_expiry_sweep)
             };
-            eprintln!("[SESSION] read timers: {}ms", t.elapsed().as_millis());
+            tracing::debug!("[SESSION] read timers: {}ms", t.elapsed().as_millis());
 
             let t_sweeps = std::time::Instant::now();
             let current_time = Utc::now();
 
             if last_sweep <= current_time && !session.store.config.memory.memory_lifespan.is_zero()
             {
-                eprintln!("[SESSION] memory sweep TRIGGERED");
+                tracing::debug!("[SESSION] memory sweep TRIGGERED");
                 tracing::info!(
                     "Session id {}: Session Memory Cleaning Started",
                     session.id.clone()
@@ -182,7 +182,7 @@ where
             }
 
             if last_database_sweep <= current_time && session.store.is_persistent() {
-                eprintln!("[SESSION] database sweep TRIGGERED");
+                tracing::debug!("[SESSION] database sweep TRIGGERED");
                 tracing::info!(
                     "Session id {}: Session Database Cleaning Started",
                     session.id
@@ -223,13 +223,13 @@ where
                 );
             }
 
-            eprintln!("[SESSION] sweeps: {}ms", t_sweeps.elapsed().as_millis());
+            tracing::debug!("[SESSION] sweeps: {}ms", t_sweeps.elapsed().as_millis());
 
             req.extensions_mut().insert(session.clone());
 
             let t = std::time::Instant::now();
             let mut response = ready_inner.call(req).await?;
-            eprintln!("[SESSION] inner call: {}ms", t.elapsed().as_millis());
+            tracing::debug!("[SESSION] inner call: {}ms", t.elapsed().as_millis());
 
             let (renew, storable, destroy, loaded) =
                 if let Some(session_data) = session.store.inner.get(&session.id) {
@@ -321,7 +321,7 @@ where
                     if let Err(err) = session.store.store_session(&sess).await {
                         return trace_error(err, "failed to save session to database");
                     } else {
-                        eprintln!("[SESSION] store_session (UPSERT): {}ms", t_store.elapsed().as_millis());
+                        tracing::debug!("[SESSION] store_session (UPSERT): {}ms", t_store.elapsed().as_millis());
                     }
                 }
             }
@@ -373,9 +373,9 @@ where
                 storable,
             )
             .await;
-            eprintln!("[SESSION] set_headers: {}ms", t.elapsed().as_millis());
+            tracing::debug!("[SESSION] set_headers: {}ms", t.elapsed().as_millis());
 
-            eprintln!("[SESSION] TOTAL: {}ms", session_total_start.elapsed().as_millis());
+            tracing::debug!("[SESSION] TOTAL: {}ms", session_total_start.elapsed().as_millis());
             Ok(response)
         })
     }
