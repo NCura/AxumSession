@@ -317,12 +317,15 @@ where
                 };
 
                 if let Some(sess) = clone_session {
-                    let t_store = std::time::Instant::now();
-                    if let Err(err) = session.store.store_session(&sess).await {
-                        return trace_error(err, "failed to save session to database");
-                    } else {
-                        tracing::info!("[SESSION] store_session (UPSERT): {}ms", t_store.elapsed().as_millis());
-                    }
+                    let store = session.store.clone();
+                    tokio::spawn(async move {
+                        let t_store = std::time::Instant::now();
+                        if let Err(err) = store.store_session(&sess).await {
+                            tracing::error!(err = %err, "failed to save session to database in background");
+                        } else {
+                            tracing::info!("[SESSION] store_session (UPSERT, bg): {}ms", t_store.elapsed().as_millis());
+                        }
+                    });
                 }
             }
 
