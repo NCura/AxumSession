@@ -108,19 +108,19 @@ where
             let token = store.config.id_generator.generate();
 
             if !store.inner.contains_key(&token) {
-                //This fixes an already used but in database issue.
-                if let Some(client) = &store.client {
-                    // Unwrap should be safe to use as we would want it to crash if there was a major database error.
-                    // This would mean the database no longer is online or the table missing etc.
-                    if !client
-                        .exists(&token.to_string(), &store.config.database.table_name)
-                        .await?
-                    {
-                        return Ok(token);
-                    }
-                } else {
-                    return Ok(token);
-                }
+                // UUID collisions are astronomically unlikely (~1 in 2^122),
+                // so we skip the DB exists() check to avoid a ~200ms round-trip.
+                // if let Some(client) = &store.client {
+                //     if !client
+                //         .exists(&token.to_string(), &store.config.database.table_name)
+                //         .await?
+                //     {
+                //         return Ok(token);
+                //     }
+                // } else {
+                //     return Ok(token);
+                // }
+                return Ok(token);
             }
         }
     }
