@@ -3,6 +3,8 @@
 #![warn(clippy::all, nonstandard_style, future_incompatible)]
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use axum_session::{DatabaseError, DatabasePool, Session, SessionStore};
 use chrono::Utc;
@@ -14,35 +16,23 @@ pub type SessionSurrealSession<C> = crate::Session<SessionSurrealPool<C>>;
 pub type SessionSurrealSessionStore<C> = SessionStore<SessionSurrealPool<C>>;
 
 ///Surreal internal Managed Pool type for DatabasePool
-/// Please refer to https://docs.rs/surrealdb/1.0.0-beta.9+20230402/surrealdb/struct.Surreal.html#method.new
-#[derive(Debug)]
+/// Wraps the connection in Arc to avoid SurrealDB's expensive session-clone
+/// on every Clone (which sends WebSocket replay messages to the server).
+#[derive(Debug, Clone)]
 pub struct SessionSurrealPool<C: Connection> {
-    connection: Surreal<C>,
-}
-
-// We do this to avoid Any needing Clone when being used in the Type traits.
-impl<C> Clone for SessionSurrealPool<C>
-where
-    C: Connection,
-{
-    fn clone(&self) -> Self {
-        Self {
-            connection: self.connection.clone(),
-        }
-    }
+    connection: Arc<Surreal<C>>,
 }
 
 impl<C: Connection> From<Surreal<C>> for SessionSurrealPool<C> {
     fn from(connection: Surreal<C>) -> Self {
-        SessionSurrealPool { connection }
+        SessionSurrealPool { connection: Arc::new(connection) }
     }
 }
 
 impl<C: Connection> SessionSurrealPool<C> {
     /// Creates a New Session pool from a Connection.
-    /// Please refer to https://docs.rs/surrealdb/1.0.0-beta.9+20230402/surrealdb/struct.Surreal.html#method.new
     pub fn new(connection: Surreal<C>) -> Self {
-        Self { connection }
+        Self { connection: Arc::new(connection) }
     }
 
     pub async fn is_valid(&self) -> Result<(), DatabaseError> {
@@ -130,6 +120,12 @@ impl<C: Connection> DatabasePool for SessionSurrealPool<C> {
     }
 
     async fn load(&self, id: &str, table_name: &str) -> Result<Option<String>, DatabaseError> {
+        let t = std::time::Instant::now();
+        let expires = Utc::now().timestamp();
+        tracing::info!(
+            "[SESSION:DB] load start — table={table_name}, id={id}, expires={expires}"
+        );
+
         let mut res = self
             .connection
             .query(
@@ -138,13 +134,19 @@ impl<C: Connection> DatabasePool for SessionSurrealPool<C> {
             )
             .bind(("table_name", table_name.to_string()))
             .bind(("session_id", id.to_string()))
-            .bind(("expires", Utc::now().timestamp()))
+            .bind(("expires", expires))
             .await
             .map_err(|err| DatabaseError::GenericSelectError(err.to_string()))?;
+        tracing::info!("[SESSION:DB] load query completed in {}ms", t.elapsed().as_millis());
 
         let response: Option<String> = res
             .take("sessionstore")
             .map_err(|err| DatabaseError::GenericNotSupportedError(err.to_string()))?;
+        tracing::info!(
+            "[SESSION:DB] load take completed in {}ms, found={}",
+            t.elapsed().as_millis(),
+            response.is_some()
+        );
         Ok(response)
     }
 

@@ -16,5 +16,6 @@ axum_session.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
 serde.workspace = true
-surrealdb = { version = "3.0.0" }
-surrealdb-types = { version = "3.0.0" }
+surrealdb = { version = "3.0.3" }
+surrealdb-types = { version = "3.0.3" }
+tracing = "0.1"
