@@ -109,17 +109,7 @@ where
 
             if !store.inner.contains_key(&token) {
                 // UUID collisions are astronomically unlikely (~1 in 2^122),
-                // so we skip the DB exists() check to avoid a ~200ms round-trip.
-                // if let Some(client) = &store.client {
-                //     if !client
-                //         .exists(&token.to_string(), &store.config.database.table_name)
-                //         .await?
-                //     {
-                //         return Ok(token);
-                //     }
-                // } else {
-                //     return Ok(token);
-                // }
+                // skip the DB exists() check to avoid unnecessary round-trip
                 return Ok(token);
             }
         }

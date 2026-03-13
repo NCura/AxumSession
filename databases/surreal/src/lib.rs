@@ -117,11 +117,7 @@ impl<C: Connection> DatabasePool for SessionSurrealPool<C> {
     }
 
     async fn load(&self, id: &str, table_name: &str) -> Result<Option<String>, DatabaseError> {
-        let t = std::time::Instant::now();
         let expires = Utc::now().timestamp();
-        tracing::info!(
-            "[SESSION:DB] load start — table={table_name}, id={id}, expires={expires}"
-        );
 
         let mut res = self
             .connection
@@ -134,16 +130,10 @@ impl<C: Connection> DatabasePool for SessionSurrealPool<C> {
             .bind(("expires", expires))
             .await
             .map_err(|err| DatabaseError::GenericSelectError(err.to_string()))?;
-        tracing::info!("[SESSION:DB] load query completed in {}ms", t.elapsed().as_millis());
 
         let response: Option<String> = res
             .take("sessionstore")
             .map_err(|err| DatabaseError::GenericNotSupportedError(err.to_string()))?;
-        tracing::info!(
-            "[SESSION:DB] load take completed in {}ms, found={}",
-            t.elapsed().as_millis(),
-            response.is_some()
-        );
         Ok(response)
     }
 
