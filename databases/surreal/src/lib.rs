@@ -43,7 +43,13 @@ impl<C: Connection> SessionSurrealPool<C> {
 
 #[async_trait]
 impl<C: Connection> DatabasePool for SessionSurrealPool<C> {
-    async fn initiate(&self, _table_name: &str) -> Result<(), DatabaseError> {
+    async fn initiate(&self, table_name: &str) -> Result<(), DatabaseError> {
+        self.connection
+            .query(format!(
+                "DEFINE TABLE IF NOT EXISTS {table_name} SCHEMALESS;"
+            ))
+            .await
+            .map_err(|err| DatabaseError::GenericCreateError(err.to_string()))?;
         Ok(())
     }
 
