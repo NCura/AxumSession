@@ -3,6 +3,8 @@
 #![warn(clippy::all, nonstandard_style, future_incompatible)]
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use axum_session::{DatabaseError, DatabasePool, Session, SessionStore};
 use chrono::Utc;
@@ -14,21 +16,22 @@ pub type SessionSurrealSession<C> = crate::Session<SessionSurrealPool<C>>;
 pub type SessionSurrealSessionStore<C> = SessionStore<SessionSurrealPool<C>>;
 
 ///Surreal internal Managed Pool type for DatabasePool
-/// Holds a static reference to the connection, avoiding any clone overhead.
-#[derive(Debug, Clone, Copy)]
+/// Holds an Arc-wrapped connection. Since SurrealDB 3.0, `Surreal::clone()` is
+/// no longer cheap, so we use `Arc` to avoid cloning the underlying connection.
+#[derive(Debug, Clone)]
 pub struct SessionSurrealPool<C: Connection> {
-    connection: &'static Surreal<C>,
+    connection: Arc<Surreal<C>>,
 }
 
-impl<C: Connection> From<&'static Surreal<C>> for SessionSurrealPool<C> {
-    fn from(connection: &'static Surreal<C>) -> Self {
+impl<C: Connection> From<Arc<Surreal<C>>> for SessionSurrealPool<C> {
+    fn from(connection: Arc<Surreal<C>>) -> Self {
         SessionSurrealPool { connection }
     }
 }
 
 impl<C: Connection> SessionSurrealPool<C> {
-    /// Creates a New Session pool from a static reference to a Connection.
-    pub fn new(connection: &'static Surreal<C>) -> Self {
+    /// Creates a New Session pool from an Arc-wrapped Connection.
+    pub fn new(connection: Arc<Surreal<C>>) -> Self {
         Self { connection }
     }
 

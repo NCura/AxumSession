@@ -271,28 +271,27 @@ where
                 && session.store.is_persistent()
                 && !destroy
             {
-                let clone_session = if let Some(mut sess) =
-                    session.store.inner.get_mut(&session.id.clone())
-                {
-                    // Only save to DB when session data actually changed, not on every request.
-                    // Original had `|| !sess.expired()` which was always true for valid sessions,
-                    // causing a ~1s UPSERT on every request with remote SurrealDB.
-                    if session.store.config.database.always_save || sess.update {
-                        if sess.longterm {
-                            sess.expires = Utc::now() + session.store.config.max_lifespan;
+                let clone_session =
+                    if let Some(mut sess) = session.store.inner.get_mut(&session.id.clone()) {
+                        // Only save to DB when session data actually changed, not on every request.
+                        // Original had `|| !sess.expired()` which was always true for valid sessions,
+                        // causing a ~1s UPSERT on every request with remote SurrealDB.
+                        if session.store.config.database.always_save || sess.update {
+                            if sess.longterm {
+                                sess.expires = Utc::now() + session.store.config.max_lifespan;
+                            } else {
+                                sess.expires = Utc::now() + session.store.config.lifespan;
+                            };
+
+                            sess.update = false;
+
+                            Some(sess.clone())
                         } else {
-                            sess.expires = Utc::now() + session.store.config.lifespan;
-                        };
-
-                        sess.update = false;
-
-                        Some(sess.clone())
+                            None
+                        }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
+                    };
 
                 if let Some(sess) = clone_session {
                     let store = session.store.clone();
